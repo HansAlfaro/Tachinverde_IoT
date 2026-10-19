@@ -22,13 +22,15 @@ String PayloadFactory::createRecycleEvent(int idTacho, unsigned long eventCounte
     return output;
 }
 
-String PayloadFactory::createBinStatus(int idTacho, double latitud, double longitud, bool capacidad) {
+String PayloadFactory::createBinStatus(int idTacho, const String& tipo, double latitud, double longitud, bool capacidad, int porcentaje) {
     JsonDocument doc;
 
     doc["idTacho"]   = idTacho;
+    doc["tipo"]      = tipo;
     doc["latitud"]   = latitud;
     doc["longitud"]  = longitud;
     doc["capacidad"] = capacidad;
+    doc["porcentaje"] = porcentaje;
 
     String output;
     serializeJson(doc, output);

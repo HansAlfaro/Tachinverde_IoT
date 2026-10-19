@@ -19,8 +19,9 @@ public:
     const byte btnPins[3] = {25, 26, 27};
 
     float accumulatedHeight[3];
-    bool binFullNotified[3]; // Para evitar envios duplicados del evento de lleno
     const float FULL_LIMIT_CM = 110.0f;
+    const unsigned long STATUS_PUBLISH_INTERVAL_MS = 30000UL;
+    unsigned long lastStatusPublish;
     
     // Coordenadas geograficas del tacho
     double latitude;
@@ -34,7 +35,7 @@ public:
     void checkInputs();
     bool isCompartmentFull(int index);
     void addWasteHeight(int index, float cm = 5.0f);
-    void checkAndNotifyBinFull(int index);
+    void publishBinStatusesIfDue();
 };
 
 #endif

@@ -3,12 +3,11 @@
 #include "../network/PayloadFactory.h"
 
 SmartBinFacade::SmartBinFacade(IScaleSensor* sc[3], IDistanceSensor* ds[3], IActuator* sv[3], IMqttService* mqtt, double lat, double lon)
-    : mqttService(mqtt), context(nullptr), eventCounter(1), latitude(lat), longitude(lon) {
+    : mqttService(mqtt), context(nullptr), lastStatusPublish(0), latitude(lat), longitude(lon), eventCounter(1) {
     for (int i = 0; i < 3; i++) {
         scales[i] = sc[i];
         distanceSensors[i] = ds[i];
         servos[i] = sv[i];
-        binFullNotified[i] = false;
     }
     accumulatedHeight[0] = 20.0f;  // plastico
     accumulatedHeight[1] = 60.0f;  // papel/carton
@@ -42,20 +41,43 @@ void SmartBinFacade::addWasteHeight(int index, float cm) {
     }
 }
 
-void SmartBinFacade::checkAndNotifyBinFull(int index) {
-    // Si cruza el limite y todavia no se ha notificado que se lleno
-    if (isCompartmentFull(index) && !binFullNotified[index]) {
-        binFullNotified[index] = true;
-        int idTacho = index + 1;
-        bool capacidad = true; // Lleno/no disponible -> capacidad: true
+void SmartBinFacade::publishBinStatusesIfDue() {
+    unsigned long now = millis();
+    if (now - lastStatusPublish < STATUS_PUBLISH_INTERVAL_MS) {
+        return;
+    }
 
-        String payload = PayloadFactory::createBinStatus(idTacho, latitude, longitude, capacidad);
-        mqttService->publish("smartbin/status", payload);
-        Serial.println("[MQTT TX -> smartbin/status]: " + payload);
+    lastStatusPublish = now;
+    const char* binTypes[3] = {"plastico", "papel/carton", "organicos"};
+    for (int i = 0; i < 3; i++) {
+        int idTacho = i + 1;
+        int porcentaje = (int)((accumulatedHeight[i] * 100.0f / FULL_LIMIT_CM) + 0.5f);
+        if (porcentaje > 100) {
+            porcentaje = 100;
+        }
+        if (porcentaje < 0) {
+            porcentaje = 0;
+        }
+
+        String payload = PayloadFactory::createBinStatus(
+            idTacho,
+            binTypes[i],
+            latitude,
+            longitude,
+            isCompartmentFull(i),
+            porcentaje
+        );
+        if (mqttService->publish("smartbin/status", payload)) {
+            Serial.println("[MQTT TX -> smartbin/status]: " + payload);
+        } else {
+            Serial.println("[MQTT ERROR -> smartbin/status]: No se pudo publicar el estado del tacho " + String(idTacho));
+        }
     }
 }
 
 void SmartBinFacade::checkInputs() {
+    publishBinStatusesIfDue();
+
     if (Serial.available() > 0) {
         String input = Serial.readStringUntil('\n');
         input.trim();

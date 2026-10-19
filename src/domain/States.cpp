@@ -140,9 +140,6 @@ void CompartmentOpenState::update(BinContext* ctx) {
             ctx->facade->mqttService->publish("smartbin/recycle", recyclePayload);
             Serial.println("[MQTT TX -> smartbin/recycle]: " + recyclePayload);
 
-            // 2. Verificar si este deposito lleno el tacho para emitir el estado
-            ctx->facade->checkAndNotifyBinFull(comp);
-
             Serial.println("------------------------------------------");
             Serial.println("[RESUMEN LOCAL DE TRANSACCION]");
             Serial.println(" - Evento: tacho-" + String(idTacho) + "-evento-" + String(currentEventId));

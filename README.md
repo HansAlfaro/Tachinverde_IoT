@@ -104,7 +104,7 @@ mosquitto_sub.exe -h localhost -p 1883 -t "smartbin/#" -v
    - `QR:ORGANICO`
 4. Si el compartimento no está lleno, se abre su servo. El programa toma el peso inicial y espera un incremento mayor que `0.05 g` que permanezca estable durante 2.5 segundos. Al estabilizarse, cierra el servo, registra el evento, actualiza la altura estimada y vuelve al estado inicial.
 5. Si no se registra depósito en 20 segundos, el compartimento se cierra y la sesión se cancela. Si no se selecciona un residuo en 15 segundos, se cancela la sesión de selección.
-6. Las selecciones de un compartimento lleno se bloquean. Un depósito exitoso publica su evento en MQTT; al alcanzar el límite de capacidad, publica además un estado.
+6. Las selecciones de un compartimento lleno se bloquean. Un depósito exitoso publica su evento en MQTT; el estado de los tres tachos se publica periódicamente cada 30 segundos.
 
 La lógica de ejecución usa tres estados: **Idle** (espera del identificador), **AwaitingSelection** (espera del tipo de residuo) y **CompartmentOpen** (supervisa el depósito). `BinContext` administra las transiciones y `SmartBinFacade` conecta esa lógica con hardware y MQTT.
 
@@ -113,9 +113,9 @@ La lógica de ejecución usa tres estados: **Idle** (espera del identificador), 
 | Tópico | Cuándo | Contenido |
 |---|---|---|
 | `smartbin/recycle` | Después de un depósito válido | JSON con `idEvento`, `codUser`, `idTacho`, `tipo` y `peso`. |
-| `smartbin/status` | Cuando un depósito hace que el tacho alcance el límite | JSON con `idTacho`, `latitud`, `longitud` y `capacidad`. |
+| `smartbin/status` | Cada 30 segundos, para cada tacho | JSON con `idTacho`, `tipo`, `latitud`, `longitud`, `capacidad` y `porcentaje`. |
 
-En el estado actual, `capacidad: false` significa que está disponible y `capacidad: true` que está lleno/no disponible. El código no publica periódicamente los estados disponibles ni se suscribe a comandos MQTT.
+En el estado actual, `tipo` identifica el compartimento (`plastico`, `papel/carton` u `organicos`), `capacidad: false` significa que está disponible y `capacidad: true` que está lleno/no disponible. `porcentaje` es el porcentaje de llenado estimado según la altura acumulada, redondeado a un entero y limitado al rango de 0 a 100. El primer envío se realiza 30 segundos después del arranque.
 
 ## Hardware y simulación
 

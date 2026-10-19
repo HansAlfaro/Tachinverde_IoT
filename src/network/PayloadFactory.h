@@ -7,7 +7,7 @@
 class PayloadFactory {
 public:
     static String createRecycleEvent(int idTacho, unsigned long eventCounter, const String& codUser, const String& tipo, float peso);
-    static String createBinStatus(int idTacho, double latitud, double longitud, bool capacidad);
+    static String createBinStatus(int idTacho, const String& tipo, double latitud, double longitud, bool capacidad, int porcentaje);
 };
 
 #endif
