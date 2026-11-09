@@ -10,6 +10,8 @@ public:
     virtual void loop() = 0;
     virtual bool isConnected() = 0;
     virtual bool publish(const char* topic, const String& payload) = 0;
+    virtual bool subscribe(const char* topic) = 0;
+    virtual bool readMessage(String& topic, String& payload) = 0;
 };
 
 #endif

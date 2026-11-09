@@ -1,5 +1,23 @@
 #include "PayloadFactory.h"
 
+String PayloadFactory::createStudentValidationRequest(const String& codUser) {
+    JsonDocument doc;
+    doc["codUser"] = codUser;
+
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
+
+String PayloadFactory::createProductValidationRequest(const String& codProducto) {
+    JsonDocument doc;
+    doc["codProducto"] = codProducto;
+
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
+
 String PayloadFactory::createRecycleEvent(int idTacho, unsigned long eventCounter, const String& codUser, const String& tipo, float peso) {
     JsonDocument doc;
 

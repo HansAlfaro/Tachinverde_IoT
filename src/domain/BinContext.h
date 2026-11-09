@@ -18,6 +18,9 @@ public:
     float depositedWeight;
     int activeCompartment;
     unsigned long timerStart;
+    bool studentValidationPending;
+    String productCode;
+    bool productValidationPending;
     SmartBinFacade* facade;
 
     BinContext(SmartBinFacade* f);
@@ -28,6 +31,8 @@ public:
     void handleInput(String input);
     void handleButton(int btnIndex);
     void update();
+    void handleStudentValidationResponse(const String& codUser, bool exists);
+    void handleProductValidationResponse(const String& codProducto, const String& tipo, float peso);
 };
 
 #endif

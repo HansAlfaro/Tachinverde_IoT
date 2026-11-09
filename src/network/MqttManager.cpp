@@ -1,10 +1,17 @@
 #include "MqttManager.h"
 
+MqttManager* MqttManager::activeInstance = nullptr;
+
 MqttManager::MqttManager(const char* s, const char* p, const char* ip, int port)
-    : ssid(s), password(p), brokerIp(ip), brokerPort(port), mqttClient(espClient), lastReconnectAttempt(0) {}
+    : ssid(s), password(p), brokerIp(ip), brokerPort(port), mqttClient(espClient),
+      lastReconnectAttempt(0),
+      subscribedTopic(nullptr), incomingMessageAvailable(false) {
+    mqttClient.setCallback(handleMessage);
+}
 
 MqttManager& MqttManager::getInstance(const char* ssid, const char* pass, const char* ip, int port) {
     static MqttManager instance(ssid, pass, ip, port);
+    activeInstance = &instance;
     return instance;
 }
 
@@ -22,6 +29,7 @@ void MqttManager::begin() {
         Serial.println("\n[WIFI] Conectado exitosamente.");
         Serial.print("[WIFI] IP asignada: ");
         Serial.println(WiFi.localIP());
+
     } else {
         Serial.println("\n[WIFI] No se pudo conectar a Wi-Fi (timeout).");
     }
@@ -30,6 +38,10 @@ void MqttManager::begin() {
 }
 
 void MqttManager::loop() {
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+
     if (!mqttClient.connected()) {
         unsigned long now = millis();
         if (now - lastReconnectAttempt > 5000) {
@@ -51,6 +63,11 @@ void MqttManager::reconnect() {
     String clientId = "ESP32_SmartBin_" + String(random(0xffff), HEX);
     if (mqttClient.connect(clientId.c_str())) {
         Serial.println(" CONECTADO.");
+        if (subscribedTopic != nullptr && !mqttClient.subscribe(subscribedTopic)) {
+            Serial.println("[MQTT ERROR] No se pudo suscribir a " + String(subscribedTopic));
+        } else if (subscribedTopic != nullptr) {
+            Serial.println("[MQTT SUB] Suscrito a " + String(subscribedTopic));
+        }
     } else {
         Serial.print(" Fallo, rc=");
         Serial.println(mqttClient.state());
@@ -66,4 +83,41 @@ bool MqttManager::publish(const char* topic, const String& payload) {
         return mqttClient.publish(topic, payload.c_str());
     }
     return false;
+}
+
+bool MqttManager::subscribe(const char* topic) {
+    if (topic == nullptr) {
+        return false;
+    }
+
+    subscribedTopic = topic;
+    if (!mqttClient.connected()) {
+        return true;
+    }
+    return mqttClient.subscribe(topic);
+}
+
+bool MqttManager::readMessage(String& topic, String& payload) {
+    if (!incomingMessageAvailable) {
+        return false;
+    }
+
+    topic = incomingTopic;
+    payload = incomingPayload;
+    incomingMessageAvailable = false;
+    return true;
+}
+
+void MqttManager::handleMessage(char* topic, uint8_t* payload, unsigned int length) {
+    if (activeInstance == nullptr) {
+        return;
+    }
+
+    activeInstance->incomingTopic = topic;
+    activeInstance->incomingPayload.reserve(length);
+    activeInstance->incomingPayload = "";
+    for (unsigned int i = 0; i < length; i++) {
+        activeInstance->incomingPayload += static_cast<char>(payload[i]);
+    }
+    activeInstance->incomingMessageAvailable = true;
 }

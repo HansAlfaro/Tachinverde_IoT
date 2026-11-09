@@ -9,7 +9,7 @@
 const char* WIFI_SSID = "Wokwi-GUEST";
 const char* WIFI_PASS = "";
 
-const char* MQTT_BROKER = "192.168.18.143"; //IP del broker Mosquitto en la red local
+const char* MQTT_BROKER = "192.168.18.143";
 const int   MQTT_PORT   = 1883;
 
 // --- COORDENADAS GEOGRAFICAS DEL TACHO ---
@@ -23,8 +23,8 @@ HX711Adapter scaleGeneral(32, 33);
 IScaleSensor* scales[3] = { &scalePlastic, &scalePaper, &scaleGeneral };
 
 // 2. Sensores Ultrasonicos
-HCSR04Adapter usPlastic(4, 16);
-HCSR04Adapter usPaper(5, 18);
+HCSR04Adapter usPlastic(4, 34);
+HCSR04Adapter usPaper(5, 35);
 HCSR04Adapter usGeneral(2, 15);
 IDistanceSensor* distanceSensors[3] = { &usPlastic, &usPaper, &usGeneral };
 

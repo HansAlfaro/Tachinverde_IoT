@@ -5,6 +5,7 @@
 #include "../hardware/IScaleSensor.h"
 #include "../hardware/IDistanceSensor.h"
 #include "../hardware/IActuator.h"
+#include "../hardware/LcdStatusDisplay.h"
 #include "../network/IMqttService.h"
 
 class BinContext;
@@ -15,6 +16,7 @@ public:
     IDistanceSensor* distanceSensors[3];
     IActuator* servos[3];
     IMqttService* mqttService;
+    LcdStatusDisplay statusDisplay;
     BinContext* context;
     const byte btnPins[3] = {25, 26, 27};
 
@@ -33,8 +35,10 @@ public:
     ~SmartBinFacade();
     void begin();
     void checkInputs();
+    void showProcessState(const String& state, const String& detail);
     bool isCompartmentFull(int index);
     void addWasteHeight(int index, float cm = 5.0f);
+    void publishBinStatus(int index);
     void publishBinStatusesIfDue();
 };
 
