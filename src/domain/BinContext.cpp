@@ -70,13 +70,13 @@ void BinContext::handleProductValidationResponse(const String& codProducto, cons
 
     int targetCompartment = -1;
     String wasteName;
-    if (normalizedType == "plastico" || normalizedType == "pet") {
+    if (normalizedType == "plastico") {
         targetCompartment = 0;
         wasteName = "plastico";
-    } else if (normalizedType == "papel" || normalizedType == "carton" || normalizedType == "papel/carton") {
+    } else if (normalizedType == "papel/carton") {
         targetCompartment = 1;
         wasteName = "papel/carton";
-    } else if (normalizedType == "vidrio" || normalizedType == "cristal") {
+    } else if (normalizedType == "vidrio") {
         targetCompartment = 2;
         wasteName = "vidrio";
     }
