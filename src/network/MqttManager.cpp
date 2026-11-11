@@ -2,15 +2,20 @@
 
 MqttManager* MqttManager::activeInstance = nullptr;
 
-MqttManager::MqttManager(const char* s, const char* p, const char* ip, int port)
-    : ssid(s), password(p), brokerIp(ip), brokerPort(port), mqttClient(espClient),
+MqttManager::MqttManager(const char* s, const char* wifiPass, const char* ip, int port,
+                         const char* mqttUser, const char* mqttPass)
+    : ssid(s), wifiPassword(wifiPass), brokerIp(ip), brokerPort(port),
+      mqttUsername(mqttUser), mqttPassword(mqttPass),
       lastReconnectAttempt(0),
-      subscribedTopic(nullptr), incomingMessageAvailable(false) {
-    mqttClient.setCallback(handleMessage);
+      incomingMessageAvailable(false) {
+    mqttClient.begin(brokerIp, brokerPort, espClient);
+    mqttClient.onMessage(handleMessage);
 }
 
-MqttManager& MqttManager::getInstance(const char* ssid, const char* pass, const char* ip, int port) {
-    static MqttManager instance(ssid, pass, ip, port);
+MqttManager& MqttManager::getInstance(const char* ssid, const char* wifiPass,
+                                      const char* ip, int port,
+                                      const char* mqttUser, const char* mqttPass) {
+    static MqttManager instance(ssid, wifiPass, ip, port, mqttUser, mqttPass);
     activeInstance = &instance;
     return instance;
 }
@@ -18,7 +23,7 @@ MqttManager& MqttManager::getInstance(const char* ssid, const char* pass, const 
 void MqttManager::begin() {
     Serial.print("[WIFI] Conectando a ");
     Serial.println(ssid);
-    WiFi.begin(ssid, password);
+    WiFi.begin(ssid, wifiPassword);
 
     unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
@@ -33,8 +38,6 @@ void MqttManager::begin() {
     } else {
         Serial.println("\n[WIFI] No se pudo conectar a Wi-Fi (timeout).");
     }
-
-    mqttClient.setServer(brokerIp, brokerPort);
 }
 
 void MqttManager::loop() {
@@ -61,16 +64,18 @@ void MqttManager::reconnect() {
     Serial.print("...");
 
     String clientId = "ESP32_SmartBin_" + String(random(0xffff), HEX);
-    if (mqttClient.connect(clientId.c_str())) {
+    if (mqttClient.connect(clientId.c_str(), mqttUsername, mqttPassword)) {
         Serial.println(" CONECTADO.");
-        if (subscribedTopic != nullptr && !mqttClient.subscribe(subscribedTopic)) {
-            Serial.println("[MQTT ERROR] No se pudo suscribir a " + String(subscribedTopic));
-        } else if (subscribedTopic != nullptr) {
-            Serial.println("[MQTT SUB] Suscrito a " + String(subscribedTopic));
+        for (const String& topic : subscribedTopics) {
+            if (!mqttClient.subscribe(topic.c_str(), 1)) {
+                Serial.println("[MQTT ERROR] No se pudo suscribir a " + topic);
+            } else {
+                Serial.println("[MQTT SUB QoS 1] Suscrito a " + topic);
+            }
         }
     } else {
-        Serial.print(" Fallo, rc=");
-        Serial.println(mqttClient.state());
+        Serial.print(" Fallo, error=");
+        Serial.println(static_cast<int>(mqttClient.lastError()));
     }
 }
 
@@ -80,7 +85,7 @@ bool MqttManager::isConnected() {
 
 bool MqttManager::publish(const char* topic, const String& payload) {
     if (mqttClient.connected()) {
-        return mqttClient.publish(topic, payload.c_str());
+        return mqttClient.publish(topic, payload, false, 1);
     }
     return false;
 }
@@ -90,11 +95,17 @@ bool MqttManager::subscribe(const char* topic) {
         return false;
     }
 
-    subscribedTopic = topic;
+    for (const String& subscribedTopic : subscribedTopics) {
+        if (subscribedTopic == topic) {
+            return true;
+        }
+    }
+
+    subscribedTopics.push_back(topic);
     if (!mqttClient.connected()) {
         return true;
     }
-    return mqttClient.subscribe(topic);
+    return mqttClient.subscribe(subscribedTopics.back().c_str(), 1);
 }
 
 bool MqttManager::readMessage(String& topic, String& payload) {
@@ -108,16 +119,12 @@ bool MqttManager::readMessage(String& topic, String& payload) {
     return true;
 }
 
-void MqttManager::handleMessage(char* topic, uint8_t* payload, unsigned int length) {
+void MqttManager::handleMessage(String& topic, String& payload) {
     if (activeInstance == nullptr) {
         return;
     }
 
     activeInstance->incomingTopic = topic;
-    activeInstance->incomingPayload.reserve(length);
-    activeInstance->incomingPayload = "";
-    for (unsigned int i = 0; i < length; i++) {
-        activeInstance->incomingPayload += static_cast<char>(payload[i]);
-    }
+    activeInstance->incomingPayload = payload;
     activeInstance->incomingMessageAvailable = true;
 }

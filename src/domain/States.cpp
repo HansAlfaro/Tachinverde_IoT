@@ -5,11 +5,11 @@
 
 static void finishDeposit(BinContext* ctx) {
     int comp = ctx->activeCompartment;
-    ctx->facade->addWasteHeight(comp, 5.0f);
-    float currentHeight = ctx->facade->accumulatedHeight[comp];
+    ctx->facade().addWasteHeight(comp, 5.0f);
+    float currentHeight = ctx->facade().getAccumulatedHeight(comp);
 
     int idTacho = comp + 1;
-    unsigned long currentEventId = ctx->facade->eventCounter++;
+    unsigned long currentEventId = ctx->facade().nextEventCounter(idTacho);
 
     String recyclePayload = PayloadFactory::createRecycleEvent(
         idTacho,
@@ -18,7 +18,7 @@ static void finishDeposit(BinContext* ctx) {
         ctx->wasteType,
         ctx->depositedWeight
     );
-    if (ctx->facade->mqttService->publish("smartbin/recycle", recyclePayload)) {
+    if (ctx->facade().publishMessage("smartbin/recycle", recyclePayload)) {
         Serial.println("[MQTT TX -> smartbin/recycle]: " + recyclePayload);
     } else {
         Serial.println("[MQTT ERROR -> smartbin/recycle] No se pudo publicar el evento de reciclaje.");
@@ -33,7 +33,7 @@ static void finishDeposit(BinContext* ctx) {
     Serial.println(" - Peso depositado: " + String(ctx->depositedWeight, 2) + " g");
     Serial.println(" - Altura acumulada: " + String(currentHeight, 1) + " cm / 110.0 cm");
 
-    if (ctx->facade->isCompartmentFull(comp)) {
+    if (ctx->facade().isCompartmentFull(comp)) {
         Serial.println("[ALERTA] ¡TACHO LLENO! Capacidad: true");
         Serial.println("[BLOQUEO] Este tacho ha sido inhabilitado para futuras aperturas.");
     }
@@ -54,7 +54,7 @@ void IdleState::handleInput(BinContext* ctx, String input) {
         codUser.trim();
 
         String payload = PayloadFactory::createStudentValidationRequest(codUser);
-        if (!ctx->facade->mqttService->publish("smartbin/student/validate", payload)) {
+        if (!ctx->facade().publishMessage("smartbin/student/validate", payload)) {
             Serial.println("[MQTT ERROR -> smartbin/student/validate] No se pudo enviar el codigo. Reintente.");
             return;
         }
@@ -109,7 +109,7 @@ void AwaitingSelectionState::handleInput(BinContext* ctx, String input) {
     }
 
     String payload = PayloadFactory::createProductValidationRequest(input);
-    if (!ctx->facade->mqttService->publish("smartbin/product/validate", payload)) {
+    if (!ctx->facade().publishMessage("smartbin/product/validate", payload)) {
         Serial.println("[MQTT ERROR -> smartbin/product/validate] No se pudo enviar el codigo QR. Reintente.");
         return;
     }
@@ -123,7 +123,7 @@ void AwaitingSelectionState::handleInput(BinContext* ctx, String input) {
 }
 
 void AwaitingSelectionState::handleButton(BinContext* ctx, int btnIndex) {
-    if (ctx->facade->isCompartmentFull(btnIndex)) {
+    if (ctx->facade().isCompartmentFull(btnIndex)) {
         String names[3] = {"plastico", "papel/carton", "vidrio"};
         Serial.print("[BLOQUEADO] El tacho ");
         Serial.print(names[btnIndex]);
@@ -144,8 +144,8 @@ void AwaitingSelectionState::handleButton(BinContext* ctx, int btnIndex) {
 
     ctx->selectionMethod = "MANUAL";
     Serial.println("[BOTON PRESIONADO] Seleccionado: " + ctx->wasteType + " | Metodo: " + ctx->selectionMethod);
-    ctx->initialWeight = ctx->facade->scales[ctx->activeCompartment]->readWeight();
-    ctx->facade->servos[ctx->activeCompartment]->open();
+    ctx->initialWeight = ctx->facade().readWeight(ctx->activeCompartment);
+    ctx->facade().openCompartment(ctx->activeCompartment);
     ctx->timerStart = millis();
     ctx->transitionTo(new CompartmentOpenState());
 }
@@ -192,7 +192,7 @@ void ProductUnknownState::handleInput(BinContext* ctx, String input) {
     }
 
     String payload = PayloadFactory::createProductValidationRequest(input);
-    if (!ctx->facade->mqttService->publish("smartbin/product/validate", payload)) {
+    if (!ctx->facade().publishMessage("smartbin/product/validate", payload)) {
         Serial.println("[MQTT ERROR -> smartbin/product/validate] No se pudo enviar el codigo QR. Reintente.");
         return;
     }
@@ -212,7 +212,7 @@ void ProductUnknownState::handleButton(BinContext* ctx, int btnIndex) {
 void ProductUnknownState::update(BinContext* ctx) {
     unsigned long elapsed = millis() - ctx->timerStart;
     if (elapsed >= 3000 && !hasShownSecondMessage()) {
-        ctx->facade->statusDisplay.show("Intente con otro", "Producto");
+        ctx->facade().showStatus("Intente con otro", "Producto");
         markSecondMessageShown();
     }
     if (elapsed >= 10000) {
@@ -242,14 +242,14 @@ void CompartmentOpenState::update(BinContext* ctx) {
     int comp = ctx->activeCompartment;
     if (ctx->selectionMethod == "QR") {
         if (millis() - ctx->timerStart >= 5000) {
-            ctx->facade->servos[comp]->close();
+            ctx->facade().closeCompartment(comp);
             Serial.println("[DEPOSITO QR] Compartimiento cerrado despues de 5 segundos.");
             finishDeposit(ctx);
         }
         return;
     }
 
-    float currentWeight = ctx->facade->scales[comp]->readWeight();
+    float currentWeight = ctx->facade().readWeight(comp);
     float diff = currentWeight - ctx->initialWeight;
 
     static float lastObservedWeight = 0.0f;
@@ -271,7 +271,7 @@ void CompartmentOpenState::update(BinContext* ctx) {
             Serial.print(ctx->depositedWeight, 2);
             Serial.println(" g");
 
-            ctx->facade->servos[comp]->close();
+            ctx->facade().closeCompartment(comp);
             depositStarted = false;
             lastObservedWeight = 0.0f;
             stableStartTime = 0;
@@ -285,7 +285,7 @@ void CompartmentOpenState::update(BinContext* ctx) {
 
     if (millis() - ctx->timerStart > 20000) {
         Serial.println("[AVISO] Tiempo expirado sin deposito. Cerrando tacho.");
-        ctx->facade->servos[comp]->close();
+        ctx->facade().closeCompartment(comp);
 
         depositStarted = false;
         lastObservedWeight = 0.0f;

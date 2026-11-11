@@ -9,7 +9,7 @@ Firmware para un ESP32 que controla tres compartimentos de reciclaje, guía el d
 1. Instala [Visual Studio Code](https://code.visualstudio.com/).
 2. En **Extensiones**, instala **PlatformIO IDE** (publisher: PlatformIO).
 3. Abre en VS Code la carpeta raíz del proyecto, la que contiene `platformio.ini`.
-4. PlatformIO descargará automáticamente la plataforma ESP32 y las librerías declaradas en `platformio.ini` al compilar. Las dependencias del proyecto son HX711, ESP32Servo, PubSubClient, ArduinoJson y LiquidCrystal_I2C; no es necesario instalarlas manualmente.
+4. PlatformIO descargará automáticamente la plataforma ESP32 y las librerías declaradas en `platformio.ini` al compilar. Las dependencias del proyecto son HX711, ESP32Servo, MQTT, ArduinoJson y LiquidCrystal_I2C; no es necesario instalarlas manualmente.
 
 ### Wokwi Simulator (para simular)
 
@@ -59,9 +59,12 @@ const char* WIFI_SSID = "Wokwi-GUEST";
 const char* WIFI_PASS = "";
 const char* MQTT_BROKER = "192.168.131.63";
 const int MQTT_PORT = 1883;
+const char* MQTT_USER = "tu_usuario_mqtt";
+const char* MQTT_PASS = "tu_contrasena_mqtt";
 ```
 
 - **Wokwi:** usa `Wokwi-GUEST` y contraseña vacía. `MQTT_BROKER` debe ser la IP privada actual del equipo donde corre Mosquitto (no `localhost`) y `MQTT_PORT` debe coincidir con el listener MQTT sin TLS. El simulador debe tener ruta de red hasta esa IP y el firewall debe permitir el puerto `1883`.
+- Reemplaza `MQTT_USER` y `MQTT_PASS` en `src/main.cpp` con el usuario y la contraseña configurados en Mosquitto.
 - Esta configuración es MQTT sin cifrado ni autenticación, destinada únicamente a pruebas en una red confiable. No expongas el puerto a Internet.
 - Cambia `LATITUD` y `LONGITUD` en el mismo archivo para publicar las coordenadas del tacho.
 - Si cambias el nombre, contraseña o dirección del broker, vuelve a compilar y cargar el firmware.
@@ -94,7 +97,7 @@ mosquitto_sub.exe -h localhost -p 1883 -t "smartbin/#" -v
 
 ## Uso del sistema
 
-1. Al arrancar, el firmware inicializa Wi-Fi/MQTT y los sensores, servos y botones. El cliente MQTT intenta reconectarse cada cinco segundos si pierde la conexión.
+1. Al arrancar, el firmware inicializa Wi-Fi/MQTT y los sensores, servos y botones. El cliente MQTT intenta reconectarse cada cinco segundos si pierde la conexión. Al conectarse, consulta al backend el último evento de cada tacho y bloquea nuevas operaciones hasta sincronizar las tres secuencias; hace lo mismo después de cada reconexión.
 2. En el monitor serial, escribe un código (por ejemplo, `ID:00001001`) y presiona Enter. El firmware publica `{"codUser":"00001001"}` en `smartbin/student/validate` y espera la respuesta del backend en `smartbin/student/response`, con el formato `{"codUser":"00001001","exists":true}` o `{"codUser":"00001001","exists":false}`. Solo si `exists` es `true` pasa a selección; si es `false`, informa que el alumno no existe. La respuesta debe incluir el mismo `codUser` solicitado.
 3. Selecciona el compartimento con uno de los tres botones, o escribe por serial el código QR del producto como exactamente 8 dígitos (por ejemplo, `12345678`). El firmware envía el código al backend y espera la respuesta con el material y el peso antes de abrir el compartimento. Los códigos con letras, prefijos o una longitud distinta se rechazan.
 4. Si el compartimento no está lleno, la selección manual abre el servo y espera a que el peso de la balanza se estabilice. Para la selección por QR, el peso informado por el backend se usa directamente y el servo permanece abierto durante 5 segundos; después se cierra y se registra el depósito automáticamente. Tras completar el reciclaje, la pantalla muestra “Gracias por reciclar” durante 3 segundos y luego vuelve a pedir el código del alumno.
@@ -105,6 +108,8 @@ La lógica de ejecución usa estados para la espera del identificador, validacio
 
 ### Topics MQTT
 
+El firmware publica y se suscribe con QoS 1. El broker y los clientes MQTT deben admitir QoS 1; este nivel confirma la recepción por el broker, pero puede entregar mensajes duplicados, por lo que el backend debe deduplicar eventos usando `idEvento`.
+
 | Tópico | Cuándo | Contenido |
 |---|---|---|
 | `smartbin/recycle` | Después de un depósito válido | JSON con `idEvento`, `codUser`, `idTacho`, `tipo` y `peso`. |
@@ -112,7 +117,9 @@ La lógica de ejecución usa estados para la espera del identificador, validacio
 | `smartbin/student/validate` | Al ingresar un codigo de alumno por serial | JSON con `codUser`. |
 | `smartbin/product/validate` | Al ingresar un QR de producto válido por serial | JSON con `codProducto`, código de exactamente 8 dígitos. |
 
-El firmware se suscribe a `smartbin/student/response`; el backend debe publicar allí un JSON con `codUser` y `exists` (booleano). También se suscribe a `smartbin/product/response`; el backend debe responder con un JSON como `{"codProducto":"12345678","tipo":"plastico","peso":25.5}`. `codProducto` debe coincidir con la solicitud pendiente, `tipo` debe ser exactamente `plastico`, `papel/carton` o `vidrio` (se ignoran diferencias de mayúsculas y espacios al inicio o al final) y `peso` debe ser un número no negativo expresado en gramos. Si el producto no existe o tiene otro tipo de material, el backend puede responder con `tipo:"desconocido"` (incluyendo también `peso`); el firmware no abrirá ningún compartimento. Ambas validaciones vencen tras 15 segundos sin respuesta y se ignoran respuestas con códigos que no coinciden con la solicitud pendiente.
+El firmware se suscribe a `smartbin/+/response` y `smartbin/events/last/response` para recibir respuestas. El backend debe responder a las consultas de secuencia en `smartbin/events/last/request` con `{"idTacho":1,"lastEvent":42}` en `smartbin/events/last/response`. `lastEvent` es el último número usado por ese tacho, o `0` si aún no tiene eventos; la secuencia de cada tacho empieza en `1`. El firmware consulta los tachos 1, 2 y 3 en orden, reintenta cada cinco segundos si no recibe respuesta y no acepta nuevos ingresos hasta completar la sincronización. En caso de reconexión, conserva además el siguiente número local si es mayor que el reportado por el backend. El backend debe seguir deduplicando por `idEvento`: la consulta al historial no elimina la posibilidad de reenvíos QoS 1.
+
+El backend también debe publicar en `smartbin/student/response` un JSON con `codUser` y `exists` (booleano), y responder en `smartbin/product/response` con un JSON como `{"codProducto":"12345678","tipo":"plastico","peso":25.5}`. `codProducto` debe coincidir con la solicitud pendiente, `tipo` debe ser exactamente `plastico`, `papel/carton` o `vidrio` (se ignoran diferencias de mayúsculas y espacios al inicio o al final) y `peso` debe ser un número no negativo expresado en gramos. Si el producto no existe o tiene otro tipo de material, el backend puede responder con `tipo:"desconocido"` (incluyendo también `peso`); el firmware no abrirá ningún compartimento. Ambas validaciones vencen tras 15 segundos sin respuesta y se ignoran respuestas con códigos que no coinciden con la solicitud pendiente.
 
 En el estado actual, `tipo` identifica el compartimento (`plastico`, `papel/carton` o `vidrio`), `capacidad: false` significa que está disponible y `capacidad: true` que está lleno/no disponible. `porcentaje` es el porcentaje de llenado estimado según la altura acumulada, redondeado a un entero y limitado al rango de 0 a 100. El primer envío se realiza 30 segundos después del arranque.
 

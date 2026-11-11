@@ -9,6 +9,7 @@ class SmartBinFacade;
 class BinContext {
 private:
     IBinState* currentState;
+    SmartBinFacade* facade_;
 
 public:
     String studentId;
@@ -21,11 +22,11 @@ public:
     bool studentValidationPending;
     String productCode;
     bool productValidationPending;
-    SmartBinFacade* facade;
 
     BinContext(SmartBinFacade* f);
     ~BinContext();
 
+    SmartBinFacade& facade() const;
     void transitionTo(IBinState* newState);
     void resetSession();
     void handleInput(String input);

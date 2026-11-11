@@ -2,9 +2,14 @@
 #include "BinContext.h"
 #include "../network/PayloadFactory.h"
 #include <ArduinoJson.h>
+#include <limits.h>
 
 SmartBinFacade::SmartBinFacade(IScaleSensor* sc[3], IDistanceSensor* ds[3], IActuator* sv[3], IMqttService* mqtt, double lat, double lon)
-    : mqttService(mqtt), context(nullptr), lastStatusPublish(0), latitude(lat), longitude(lon), eventCounter(1) {
+    : mqttService(mqtt), lastStatusPublish(0), latitude(lat), longitude(lon),
+      eventCounters{1, 1, 1}, mqttWasConnected(false), eventSyncReady(false),
+      awaitingLastEvent(false), eventSyncAttempted(false), eventSyncFailed(false),
+      eventSyncTachoIndex(0),
+      lastEventSyncAttempt(0) {
     for (int i = 0; i < 3; i++) {
         scales[i] = sc[i];
         distanceSensors[i] = ds[i];
@@ -15,15 +20,12 @@ SmartBinFacade::SmartBinFacade(IScaleSensor* sc[3], IDistanceSensor* ds[3], IAct
     accumulatedHeight[2] = 106.0f; // vidrio (cerca del limite de 110 cm)
 }
 
-SmartBinFacade::~SmartBinFacade() {
-    if (context != nullptr) delete context;
-}
-
 void SmartBinFacade::begin() {
     statusDisplay.begin();
 
-    if (!mqttService->subscribe("smartbin/+/response")) {
-        Serial.println("[MQTT ERROR] No se pudo configurar la suscripcion a smartbin/+/response.");
+    if (!mqttService->subscribe("smartbin/+/response") ||
+        !mqttService->subscribe("smartbin/events/last/response")) {
+        Serial.println("[MQTT ERROR] No se pudieron configurar las suscripciones de respuesta MQTT.");
     }
 
     for (int i = 0; i < 3; i++) {
@@ -32,7 +34,7 @@ void SmartBinFacade::begin() {
         servos[i]->begin();
         pinMode(btnPins[i], INPUT_PULLUP);
     }
-    context = new BinContext(this);
+    context.reset(new BinContext(this));
 }
 
 void SmartBinFacade::showProcessState(const String& state, const String& detail) {
@@ -53,11 +55,139 @@ void SmartBinFacade::showProcessState(const String& state, const String& detail)
     }
 }
 
+void SmartBinFacade::showStatus(const String& line1, const String& line2) {
+    statusDisplay.show(line1, line2);
+}
+
+bool SmartBinFacade::publishMessage(const char* topic, const String& payload) {
+    return mqttService->publish(topic, payload);
+}
+
+float SmartBinFacade::readWeight(int index) {
+    if (index < 0 || index >= 3) {
+        Serial.println("[ERROR] Indice de compartimiento invalido al leer el peso.");
+        return 0.0f;
+    }
+    return scales[index]->readWeight();
+}
+
+void SmartBinFacade::openCompartment(int index) {
+    if (index < 0 || index >= 3) {
+        Serial.println("[ERROR] Indice de compartimiento invalido al abrir.");
+        return;
+    }
+    servos[index]->open();
+}
+
+void SmartBinFacade::closeCompartment(int index) {
+    if (index < 0 || index >= 3) {
+        Serial.println("[ERROR] Indice de compartimiento invalido al cerrar.");
+        return;
+    }
+    servos[index]->close();
+}
+
 bool SmartBinFacade::isCompartmentFull(int index) {
     if (index >= 0 && index < 3) {
         return accumulatedHeight[index] >= FULL_LIMIT_CM;
     }
     return false;
+}
+
+float SmartBinFacade::getAccumulatedHeight(int index) const {
+    if (index < 0 || index >= 3) {
+        Serial.println("[ERROR] Indice de compartimiento invalido al consultar la altura.");
+        return 0.0f;
+    }
+    return accumulatedHeight[index];
+}
+
+unsigned long SmartBinFacade::nextEventCounter(int idTacho) {
+    if (idTacho < 1 || idTacho > 3) {
+        Serial.println("[ERROR] Indice de tacho invalido al generar idEvento.");
+        return 0;
+    }
+    return eventCounters[idTacho - 1]++;
+}
+
+void SmartBinFacade::startEventSync() {
+    eventSyncReady = false;
+    awaitingLastEvent = false;
+    eventSyncAttempted = false;
+    eventSyncFailed = false;
+    eventSyncTachoIndex = 0;
+    Serial.println("[MQTT] Sincronizando la secuencia de eventos con el backend.");
+}
+
+void SmartBinFacade::pollEventSync() {
+    if (eventSyncReady || eventSyncFailed || !mqttService->isConnected()) {
+        return;
+    }
+
+    if (eventSyncTachoIndex >= 3) {
+        eventSyncReady = true;
+        Serial.println("[MQTT] Secuencias sincronizadas. Sistema habilitado.");
+        return;
+    }
+
+    const unsigned long now = millis();
+    if (awaitingLastEvent) {
+        if (now - lastEventSyncAttempt < EVENT_SYNC_RETRY_INTERVAL_MS) {
+            return;
+        }
+        Serial.println("[MQTT TIMEOUT] Sin respuesta al consultar el ultimo evento; se reintentara.");
+        awaitingLastEvent = false;
+    } else if (eventSyncAttempted && now - lastEventSyncAttempt < EVENT_SYNC_RETRY_INTERVAL_MS) {
+        return;
+    }
+
+    const int idTacho = eventSyncTachoIndex + 1;
+    const String payload = PayloadFactory::createLastEventRequest(idTacho);
+    lastEventSyncAttempt = now;
+    eventSyncAttempted = true;
+    if (mqttService->publish("smartbin/events/last/request", payload)) {
+        awaitingLastEvent = true;
+        Serial.println("[MQTT TX -> smartbin/events/last/request]: " + payload);
+    } else {
+        Serial.println("[MQTT ERROR] No se pudo consultar la secuencia del tacho " + String(idTacho) + ".");
+    }
+}
+
+void SmartBinFacade::handleLastEventResponse(const String& payload) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+        Serial.println("[MQTT ERROR] Respuesta del ultimo evento JSON invalida: " + String(error.c_str()));
+        return;
+    }
+    if (!doc["idTacho"].is<int>() || !doc["lastEvent"].is<unsigned long>()) {
+        Serial.println("[MQTT ERROR] La respuesta debe incluir idTacho y lastEvent (enteros no negativos).");
+        return;
+    }
+
+    const int idTacho = doc["idTacho"].as<int>();
+    if (!awaitingLastEvent || idTacho != eventSyncTachoIndex + 1) {
+        Serial.println("[MQTT RX] Respuesta de secuencia ignorada (tacho no solicitado).");
+        return;
+    }
+
+    const unsigned long lastEvent = doc["lastEvent"].as<unsigned long>();
+    if (lastEvent == ULONG_MAX) {
+        Serial.println("[MQTT ERROR] La secuencia de eventos del backend alcanzo el maximo.");
+        awaitingLastEvent = false;
+        eventSyncFailed = true;
+        return;
+    }
+
+    const unsigned long nextEvent = lastEvent + 1;
+    if (eventCounters[idTacho - 1] < nextEvent) {
+        eventCounters[idTacho - 1] = nextEvent;
+    }
+    Serial.println("[MQTT RX] Tacho " + String(idTacho) + ", ultimo evento: " +
+                   String(lastEvent) + ", siguiente: " + String(eventCounters[idTacho - 1]));
+    awaitingLastEvent = false;
+    eventSyncAttempted = false;
+    eventSyncTachoIndex++;
 }
 
 void SmartBinFacade::addWasteHeight(int index, float cm) {
@@ -113,12 +243,33 @@ void SmartBinFacade::publishBinStatusesIfDue() {
 }
 
 void SmartBinFacade::checkInputs() {
+    if (!context) {
+        Serial.println("[ERROR] SmartBinFacade::begin() debe ejecutarse antes de checkInputs().");
+        return;
+    }
+
+    const bool connected = mqttService->isConnected();
+    if (connected && !mqttWasConnected) {
+        startEventSync();
+    } else if (!connected && mqttWasConnected) {
+        eventSyncReady = false;
+        awaitingLastEvent = false;
+        eventSyncAttempted = false;
+        eventSyncFailed = false;
+        eventSyncTachoIndex = 0;
+        Serial.println("[MQTT] Conexion perdida; se bloquearan nuevas operaciones hasta sincronizar.");
+    }
+    mqttWasConnected = connected;
+    pollEventSync();
+
     publishBinStatusesIfDue();
 
     String incomingTopic;
     String incomingPayload;
     if (mqttService->readMessage(incomingTopic, incomingPayload)) {
-        if (incomingTopic == "smartbin/student/response") {
+        if (incomingTopic == "smartbin/events/last/response") {
+            handleLastEventResponse(incomingPayload);
+        } else if (incomingTopic == "smartbin/student/response") {
             JsonDocument doc;
             DeserializationError error = deserializeJson(doc, incomingPayload);
             if (error) {
@@ -151,6 +302,15 @@ void SmartBinFacade::checkInputs() {
         } else {
             Serial.println("[MQTT RX] Mensaje ignorado en topic no esperado: " + incomingTopic);
         }
+    }
+
+    if (!eventSyncReady) {
+        if (Serial.available() > 0) {
+            Serial.readStringUntil('\n');
+            Serial.println("[MQTT] Operacion ignorada: esperando sincronizacion de eventos.");
+        }
+        context->update();
+        return;
     }
 
     if (Serial.available() > 0) {

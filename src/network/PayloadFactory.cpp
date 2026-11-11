@@ -1,5 +1,14 @@
 #include "PayloadFactory.h"
 
+String PayloadFactory::createLastEventRequest(int idTacho) {
+    JsonDocument doc;
+    doc["idTacho"] = idTacho;
+
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
+
 String PayloadFactory::createStudentValidationRequest(const String& codUser) {
     JsonDocument doc;
     doc["codUser"] = codUser;

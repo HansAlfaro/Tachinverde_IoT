@@ -2,7 +2,7 @@
 #include "States.h"
 #include "SmartBinFacade.h"
 
-BinContext::BinContext(SmartBinFacade* f) : facade(f), currentState(nullptr) {
+BinContext::BinContext(SmartBinFacade* f) : currentState(nullptr), facade_(f) {
     studentValidationPending = false;
     resetSession();
     transitionTo(new IdleState());
@@ -14,12 +14,16 @@ BinContext::~BinContext() {
     }
 }
 
+SmartBinFacade& BinContext::facade() const {
+    return *facade_;
+}
+
 void BinContext::transitionTo(IBinState* newState) {
     if (currentState != nullptr) delete currentState;
     currentState = newState;
     Serial.print("[ESTADO] -> ");
     Serial.println(currentState->getStateName());
-    facade->showProcessState(currentState->getStateName(), wasteType);
+    facade_->showProcessState(currentState->getStateName(), wasteType);
 }
 
 void BinContext::resetSession() {
@@ -90,7 +94,7 @@ void BinContext::handleProductValidationResponse(const String& codProducto, cons
         return;
     }
 
-    if (facade->isCompartmentFull(targetCompartment)) {
+    if (facade_->isCompartmentFull(targetCompartment)) {
         Serial.println("[BLOQUEADO] El compartimiento de " + wasteName + " esta lleno. Puede elegir otro producto o usar los botones.");
         productCode = "";
         timerStart = millis();
@@ -102,7 +106,7 @@ void BinContext::handleProductValidationResponse(const String& codProducto, cons
     selectionMethod = "QR";
     activeCompartment = targetCompartment;
     depositedWeight = peso;
-    facade->servos[activeCompartment]->open();
+    facade_->openCompartment(activeCompartment);
     timerStart = millis();
     Serial.println("[PRODUCTO VALIDADO] Codigo: " + productCode + " | Material: " + wasteType +
                    " | Peso recibido: " + String(depositedWeight, 2) + " g");

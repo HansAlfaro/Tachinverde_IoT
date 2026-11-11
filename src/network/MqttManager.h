@@ -2,29 +2,35 @@
 #define MQTT_MANAGER_H
 
 #include <WiFi.h>
-#include <PubSubClient.h>
+#include <MQTT.h>
+#include <vector>
 #include "IMqttService.h"
 
 class MqttManager : public IMqttService {
 private:
     const char* ssid;
-    const char* password;
+    const char* wifiPassword;
     const char* brokerIp;
     int brokerPort;
+    const char* mqttUsername;
+    const char* mqttPassword;
     WiFiClient espClient;
-    PubSubClient mqttClient;
+    MQTTClient mqttClient;
     unsigned long lastReconnectAttempt;
-    const char* subscribedTopic;
+    std::vector<String> subscribedTopics;
     String incomingTopic;
     String incomingPayload;
     bool incomingMessageAvailable;
 
-    MqttManager(const char* ssid, const char* pass, const char* ip, int port);
+    MqttManager(const char* ssid, const char* wifiPass, const char* ip, int port,
+                const char* mqttUser, const char* mqttPass);
     static MqttManager* activeInstance;
-    static void handleMessage(char* topic, uint8_t* payload, unsigned int length);
+    static void handleMessage(String& topic, String& payload);
 
 public:
-    static MqttManager& getInstance(const char* ssid = "Wokwi-GUEST", const char* pass = "", const char* ip = "192.168.131.63", int port = 1883);
+    static MqttManager& getInstance(const char* ssid = "Wokwi-GUEST", const char* wifiPass = "",
+                                    const char* ip = "192.168.131.63", int port = 1883,
+                                    const char* mqttUser = "", const char* mqttPass = "");
 
     void begin() override;
     void loop() override;

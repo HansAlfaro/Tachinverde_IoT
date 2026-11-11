@@ -6,6 +6,7 @@
 
 class PayloadFactory {
 public:
+    static String createLastEventRequest(int idTacho);
     static String createStudentValidationRequest(const String& codUser);
     static String createProductValidationRequest(const String& codProducto);
     static String createRecycleEvent(int idTacho, unsigned long eventCounter, const String& codUser, const String& tipo, float peso);

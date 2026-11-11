@@ -11,6 +11,8 @@ const char* WIFI_PASS = "";
 
 const char* MQTT_BROKER = "192.168.18.143";
 const int   MQTT_PORT   = 1883;
+const char* MQTT_USER   = "admin";
+const char* MQTT_PASS   = "12345";
 
 // --- COORDENADAS GEOGRAFICAS DEL TACHO ---
 const double LATITUD  = -12.0464; // Rango [-90, 90]
@@ -35,7 +37,9 @@ CompartmentServo servoGeneral(14);
 IActuator* servos[3] = { &servoPlastic, &servoPaper, &servoGeneral };
 
 // 4. Servicio MQTT
-MqttManager& mqttService = MqttManager::getInstance(WIFI_SSID, WIFI_PASS, MQTT_BROKER, MQTT_PORT);
+MqttManager& mqttService = MqttManager::getInstance(
+    WIFI_SSID, WIFI_PASS, MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASS
+);
 
 // Inyeccion de dependencias a la Fachada con las coordenadas
 SmartBinFacade smartBin(scales, distanceSensors, servos, &mqttService, LATITUD, LONGITUD);
